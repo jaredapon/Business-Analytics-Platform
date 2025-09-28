@@ -172,9 +172,9 @@ for file_path, label in rules_files:
              label='Actual', marker='o', linewidth=2, markersize=4)
     
     # Fitted values (in-sample prediction)
-    fitted_values = fitted.fittedvalues
-    plt.plot(bundle_sales_ts.index, fitted_values, 
-             label='Fitted', marker='s', linestyle='--', markersize=3)
+    # fitted_values = fitted.fittedvalues
+    # plt.plot(bundle_sales_ts.index, fitted_values, 
+    #          label='Fitted', marker='s', linestyle='--', markersize=3)
     
     # Forecast (out-of-sample prediction)
     forecast_index = pd.date_range(bundle_sales_ts.index[-1], periods=forecast_steps+1, freq='ME')[1:]

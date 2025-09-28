@@ -107,8 +107,8 @@ for file_path, label in rules_files:
     # Actual
     plt.plot(bundle_sales_ts.index, bundle_sales_ts.values, label='Actual', marker='o')
     # Fitted (in-sample prediction)
-    fitted_values = fitted.fittedvalues
-    plt.plot(bundle_sales_ts.index, fitted_values, label='Fitted', marker='s', linestyle=':')
+    # fitted_values = fitted.fittedvalues
+    # plt.plot(bundle_sales_ts.index, fitted_values, label='Fitted', marker='s', linestyle=':')
     # Forecast (out-of-sample prediction)
     forecast_index = pd.date_range(bundle_sales_ts.index[-1], periods=forecast_steps+1, freq='ME')[1:]
     plt.plot(forecast_index, forecast.values, label='Forecast', marker='x', linestyle='--')
