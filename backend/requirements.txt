@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+minio
+psycopg2-binary
+sqlalchemy
+python-multipart    
+python-dotenv       
