@@ -1,0 +1,47 @@
+# ETL output folders
+arima_results/
+cleaned_data/
+descriptive_results/
+etl_dimensions/
+holtwinters_results/
+mba_drinks/
+mba_foods/
+mba_meals/
+mba_results/
+raw_costing/
+raw_sales/
+raw_sales_by_product/
+regression_results/
+
+
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env.example/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+
+# Environmental variable
+.env
