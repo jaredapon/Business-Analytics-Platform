@@ -93,10 +93,6 @@ for file_path, label in rules_files:
         print(f"  R²: {r2:.4f}")
         print(f"  MSE: {mse:.4f}")
         print(f"  RMSE: {rmse:.4f}")
-        print(f"Mean transactions: {y.mean():.2f}")
-        print(f"Median transactions: {y.median():.2f}")
-        print(f"Std transactions: {y.std():.2f}")
-        print(f"RMSE as % of mean: {rmse / y.mean() * 100:.2f}%")
 
         min_price = demand_summary['Combined_AB_Price'].min()
         max_price = demand_summary['Combined_AB_Price'].max()
