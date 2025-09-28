@@ -10,9 +10,10 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 500)
 pd.set_option('display.max_colwidth', 500)
 
+
 # Create folder for mba_results
-results_folder = 'mba_results'
-os.makedirs(results_folder, exist_ok=True)
+# results_folder = 'mba_results'
+# os.makedirs(results_folder, exist_ok=True)
 
 print("Loading transaction data...")
 df = pd.read_csv('etl_dimensions/transaction_records.csv')
@@ -191,29 +192,30 @@ if 'id_to_name' in locals():
 
 
 # Export to Excel with multiple tabs
-excel_file_path = os.path.join(
-    results_folder, 'market_basket_analysis_results.xlsx')
-with pd.ExcelWriter(excel_file_path, engine='openpyxl') as writer:
-    frequent_itemsets_export.to_excel(
-        writer, sheet_name='frequent_itemsets', index=False)
-    association_rules_export.to_excel(
-        writer, sheet_name='association_rules', index=False)
 
-# Export to CSV files
-frequent_itemsets_csv_path = os.path.join(
-    results_folder, 'frequent_itemsets.csv')
-association_rules_csv_path = os.path.join(
-    results_folder, 'association_rules.csv')
-
-frequent_itemsets_export.to_csv(frequent_itemsets_csv_path, index=False)
-association_rules_export.to_csv(association_rules_csv_path, index=False)
-
-print(f"\nResults exported successfully:")
-print(f"- Excel file: {excel_file_path}")
-print(f"- Frequent itemsets CSV: {frequent_itemsets_csv_path}")
-print(f"- Association rules CSV: {association_rules_csv_path}")
-print(f"- Total frequent itemsets: {len(frequent_itemsets_export)}")
-print(f"- Total association rules: {len(association_rules_export)}")
+# excel_file_path = os.path.join(
+#     results_folder, 'market_basket_analysis_results.xlsx')
+# with pd.ExcelWriter(excel_file_path, engine='openpyxl') as writer:
+#     frequent_itemsets_export.to_excel(
+#         writer, sheet_name='frequent_itemsets', index=False)
+#     association_rules_export.to_excel(
+#         writer, sheet_name='association_rules', index=False)
+#
+# # Export to CSV files
+# frequent_itemsets_csv_path = os.path.join(
+#     results_folder, 'frequent_itemsets.csv')
+# association_rules_csv_path = os.path.join(
+#     results_folder, 'association_rules.csv')
+#
+# frequent_itemsets_export.to_csv(frequent_itemsets_csv_path, index=False)
+# association_rules_export.to_csv(association_rules_csv_path, index=False)
+#
+# print(f"\nResults exported successfully:")
+# print(f"- Excel file: {excel_file_path}")
+# print(f"- Frequent itemsets CSV: {frequent_itemsets_csv_path}")
+# print(f"- Association rules CSV: {association_rules_csv_path}")
+# print(f"- Total frequent itemsets: {len(frequent_itemsets_export)}")
+# print(f"- Total association rules: {len(association_rules_export)}")
 
 def run_mba_for_category(category_name, output_folder):
     print(f"\n--- Running MBA for category: {category_name} ---")
