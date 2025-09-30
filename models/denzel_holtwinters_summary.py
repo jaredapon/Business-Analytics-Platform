@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# denzel_holtwinters_summary_aligned.py
-#
-# Summary of Holt–Winters results for TOP_N bundles, aligned with the in-depth script:
-#  - Resolve products by EXACT product_name
-#  - Build one COMMON_FC_INDEX from the latest actual among bundle/A/B
-#  - No asfreq() padding (sparse series allowed, like the in-depth file)
-#  - Elasticity: apply power model to RAW bundle forecast, THEN clip
-#  - Cannibalization uses non-negative baseline bundle units
-#  - Revenue math on the COMMON_FC_INDEX
-
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
@@ -33,7 +22,7 @@ TOP_N = 15
 # Time-series settings
 AGG_FREQ = 'QE'            # 'QE' Quarter End; ('MS' for Month Start, etc.)
 SEASONAL_PERIODS = 4       # 4 for quarterly, 12 for monthly, etc.
-HORIZON = 4                # number of future periods to forecast
+HORIZON = 5                # number of future periods to forecast
 
 # Holt–Winters smoothing (set OPTIMIZED=True to ignore the fixed alphas)
 OPTIMIZED = False
