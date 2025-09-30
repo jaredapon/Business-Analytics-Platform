@@ -120,5 +120,6 @@ for file_path, label in rules_files:
     fig_filename = f"holtwinters_{label.lower()}_bundle_{bundle_index}.png"
     fig_path = os.path.join(results_dir, fig_filename)
     plt.savefig(fig_path)
+    plt.show()
     plt.close()
     print(f"Saved forecast plot to {fig_path}")
