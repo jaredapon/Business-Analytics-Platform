@@ -9,12 +9,12 @@ import sys
 # USER CONFIGURATION
 # =========================
 # File paths
-RULES_PATH   = 'mba_results/association_rules.csv'
+RULES_PATH   = 'mba_meal/association_rules.csv'
 FACT_PATH    = 'etl_dimensions/fact_transaction_dimension.csv'
 PRODUCT_PATH = 'etl_dimensions/current_product_dimension.csv'
 
 # Bundle selection (row in association_rules.csv to analyze)
-BUNDLE_ROW = 7
+BUNDLE_ROW = 1
 
 # Time-series settings
 AGG_FREQ = 'QE'            # 'QE' = Quarter End; (e.g., 'MS' for Month Start)
@@ -28,15 +28,14 @@ HW_BETA  = 0.2
 HW_GAMMA = 0.2
 
 # Price scenario
-NEW_PRICE = 300            # promotional bundle price you want to test
+NEW_PRICE = 419.4         # promotional bundle price you want to test
 
 # =========================
-# LOAD BUNDLE FROM RULES (now treated as parent_sku codes)
+# LOAD BUNDLE FROM RULES
 # =========================
 try:
     rules_df = pd.read_csv(RULES_PATH)
-    required_cols = {'antecedents_names','consequents_names'}
-    if not required_cols.issubset(rules_df.columns):
+    if 'antecedents_names' not in rules_df.columns or 'consequents_names' not in rules_df.columns:
         print("Error: Required columns not found in association_rules.csv")
         sys.exit()
 
@@ -45,9 +44,9 @@ try:
         sys.exit()
 
     bundle = rules_df.iloc[BUNDLE_ROW]
-    parent_a_sku = str(bundle['antecedents_names'])
-    parent_b_sku = str(bundle['consequents_names'])
-    print(f"Analyzing bundle (parent_sku): '{parent_a_sku}' and '{parent_b_sku}'")
+    product_a_name = bundle['antecedents_names']
+    product_b_name = bundle['consequents_names']
+    print(f"Analyzing bundle: '{product_a_name}' and '{product_b_name}'")
 
 except FileNotFoundError:
     print(f"Error: '{RULES_PATH}' not found.")
@@ -66,60 +65,30 @@ except FileNotFoundError as e:
     print(f"Error loading data: {e}")
     sys.exit()
 
-# Basic column sanity
-for col in ['product_id','parent_sku','Price']:
-    if col not in product_df.columns:
-        print(f"Error: '{col}' not found in product dimension.")
-        sys.exit()
-for col in ['Product ID','Receipt No','Line Total','Date']:
-    if col not in fact_df.columns:
-        print(f"Error: '{col}' not found in fact table.")
-        sys.exit()
-
-# =========================
-# MAP parent_sku -> child product_ids and representative price
-# =========================
-def ids_and_price_for_parent(parent_sku: str):
-    subset = product_df[product_df['parent_sku'] == parent_sku]
-    if subset.empty:
-        return set(), np.nan
-    child_ids = set(subset['product_id'].dropna().astype(str))
-    # Representative price for the parent group (MEDIAN of child prices)
-    rep_price = float(subset['Price'].median())
-    return child_ids, rep_price
-
-child_ids_a, price_a = ids_and_price_for_parent(parent_a_sku)
-child_ids_b, price_b = ids_and_price_for_parent(parent_b_sku)
-
-if not child_ids_a or not child_ids_b:
-    print(f"Could not resolve child product_ids for one or both parent_sku: "
-          f"'{parent_a_sku}'({len(child_ids_a)}) or '{parent_b_sku}'({len(child_ids_b)}).")
+# Map product names -> IDs
+product_a_match = product_df[product_df['product_name'] == product_a_name]
+product_b_match = product_df[product_df['product_name'] == product_b_name]
+if product_a_match.empty or product_b_match.empty:
+    print(f"Could not find product IDs for '{product_a_name}' or '{product_b_name}'.")
     sys.exit()
 
-# Standardize types for join/isin
-fact_df['Product ID'] = fact_df['Product ID'].astype(str)
+product_a_id = product_a_match['product_id'].iloc[0]
+product_b_id = product_b_match['product_id'].iloc[0]
 
 # =========================
-# BUNDLE DEMAND BY PRICE POINT (receipts that contain ANY child of A and ANY child of B)
+# BUNDLE DEMAND BY PRICE POINT (all receipts that contain BOTH)
 # =========================
-pair_transactions = fact_df[fact_df['Product ID'].isin(child_ids_a.union(child_ids_b))]
+pair_transactions = fact_df[fact_df['Product ID'].isin([product_a_id, product_b_id])]
 receipt_products = pair_transactions.groupby('Receipt No')['Product ID'].apply(set)
-
-def has_any(s: set, pool: set) -> bool:
-    return any(pid in pool for pid in s)
-
 receipts_with_both = receipt_products[
-    receipt_products.apply(lambda s: has_any(s, child_ids_a) and has_any(s, child_ids_b))
+    receipt_products.apply(lambda s: (product_a_id in s) and (product_b_id in s))
 ].index
 
-if len(receipts_with_both) == 0:
-    print("No receipts found that contain BOTH parent_sku groups. Cannot build bundle demand curve.")
-    sys.exit()
-
+# Use all receipts that contain both items (no "only pair" filter)
 working_df = fact_df[fact_df['Receipt No'].isin(receipts_with_both)]
 
 receipt_summary = working_df.groupby('Receipt No').agg(
-    Combined_Price=('Line Total', 'sum'),   # sum for the two groups in the receipt
+    Combined_Price=('Line Total', 'sum'),
     Date=('Date', 'first')
 )
 
@@ -129,47 +98,35 @@ demand_summary = (receipt_summary
                   .reset_index()
                   .sort_values('Combined_Price'))
 
-print(f"\nDemand Analysis for {parent_a_sku} + {parent_b_sku} bundle (by parent_sku):")
+print(f"\nDemand Analysis for {product_a_name} + {product_b_name} bundle:")
 print(demand_summary)
 
 # =========================
-# TIME SERIES FOR BUNDLE (AGG_FREQ)
+# TIME SERIES (AGG_FREQ)
 # =========================
 receipt_summary['Date'] = pd.to_datetime(receipt_summary['Date'], errors='coerce')
 bundle_sales_ts = receipt_summary.groupby(pd.Grouper(key='Date', freq=AGG_FREQ)).size()
 
-if bundle_sales_ts.empty:
-    print("No bundle sales found for forecasting.")
+# Individual product histories (ALL receipts)
+def build_ts_all(lines: pd.DataFrame) -> pd.Series:
+    if lines.empty:
+        return pd.Series(dtype=float)
+    rec = lines.groupby('Receipt No').agg(Date=('Date', 'first'))
+    rec['Date'] = pd.to_datetime(rec['Date'], errors='coerce')
+    return rec.groupby(pd.Grouper(key='Date', freq=AGG_FREQ)).size()
+
+a_lines_all = fact_df[fact_df['Product ID'] == product_a_id]
+b_lines_all = fact_df[fact_df['Product ID'] == product_b_id]
+
+a_ts_all = build_ts_all(a_lines_all)
+b_ts_all = build_ts_all(b_lines_all)
+
+if bundle_sales_ts.empty and (a_ts_all.empty and b_ts_all.empty):
+    print("No sales found for forecasting.")
     sys.exit()
 
 # =========================
-# HOLT-WINTERS FORECAST (BUNDLE)
-# =========================
-bundle_model = ExponentialSmoothing(
-    bundle_sales_ts,
-    trend='add',
-    seasonal='add',
-    seasonal_periods=SEASONAL_PERIODS,
-    initialization_method="estimated"
-)
-
-if OPTIMIZED:
-    bundle_fitted = bundle_model.fit(optimized=True)
-else:
-    bundle_fitted = bundle_model.fit(
-        smoothing_level=HW_ALPHA,
-        smoothing_trend=HW_BETA,
-        smoothing_seasonal=HW_GAMMA,
-        optimized=False
-    )
-
-bundle_fc = bundle_fitted.forecast(HORIZON)
-
-print(f"\n{AGG_FREQ} Holt-Winters Forecast for bundle '{parent_a_sku} + {parent_b_sku}':")
-print(bundle_fc)
-
-# =========================
-# CONSTANT ELASTICITY (LOG-LOG) FOR BUNDLE (from price points)
+# CONSTANT ELASTICITY (LOG-LOG) FOR BUNDLE
 # =========================
 log_df = demand_summary[(demand_summary['Combined_Price'] > 0) &
                         (demand_summary['Num_Transactions'] > 0)].copy()
@@ -193,16 +150,17 @@ print(f"Regression equation: log_Quantity = {intercept:.3f} + ({elasticity:.3f})
 # =========================
 # PRICE SETTING SCENARIO (BUNDLE) — POWER FORMULA
 # =========================
-current_price = float(price_a + price_b)  # sum of representative parent prices
+current_price_a = float(product_a_match['Price'].iloc[0])
+current_price_b = float(product_b_match['Price'].iloc[0])
+current_price = current_price_a + current_price_b
 new_price = float(NEW_PRICE)
 
 print(f"\n--- PRICE setting FORECAST ---")
-print(f"Current price (parent_sku A + B): Php {current_price:.2f} "
-      f"(A≈{price_a:.2f}, B≈{price_b:.2f})")
+print(f"Current price: Php {current_price:.2f}")
 print(f"New promotional price: Php {new_price:.2f}")
 print(f"Price change: {((new_price - current_price) / current_price * 100):.1f}%")
 
-# Power model (exact)
+# Power model multiplier
 if current_price <= 0 or new_price <= 0:
     print("Warning: Non-positive price encountered; cannot apply power formula. Falling back to no change.")
     demand_multiplier = 1.0
@@ -213,11 +171,10 @@ else:
 expected_demand_change_pct = (demand_multiplier - 1.0) * 100.0
 print(f"Expected demand change in bundle units (power model): {expected_demand_change_pct:.1f}%")
 
-bundle_fc_adj = bundle_fc * demand_multiplier
-
 # =========================
-# FORECAST INDEX (ALIGN TO AGG_FREQ)
+# COMMON FORECAST INDEX (IMPLEMENTATION A)
 # =========================
+# Determine the step (same as your plotting offset)
 if AGG_FREQ.upper().startswith('Q'):
     step = pd.offsets.QuarterEnd()
 elif AGG_FREQ.upper().startswith('M'):
@@ -225,40 +182,23 @@ elif AGG_FREQ.upper().startswith('M'):
 else:
     step = pd.tseries.frequencies.to_offset(AGG_FREQ)
 
-bundle_fc_index = pd.date_range(
-    start=bundle_sales_ts.index[-1] + step,
-    periods=len(bundle_fc),
-    freq=AGG_FREQ
-)
+def last_index_or_min(ts: pd.Series):
+    return ts.index[-1] if (ts is not None and not ts.empty) else pd.Timestamp.min
 
-# Assign explicit indices to bundle forecasts
-bundle_fc = bundle_fc.copy(); bundle_fc.index = bundle_fc_index
-bundle_fc_adj = bundle_fc_adj.copy(); bundle_fc_adj.index = bundle_fc_index
+latest_actual = max([last_index_or_min(bundle_sales_ts),
+                     last_index_or_min(a_ts_all),
+                     last_index_or_min(b_ts_all)])
 
-# =========================
-# INDIVIDUAL SERIES FOR A & B (ALL RECEIPTS, by parent_sku)
-# =========================
-def build_ts_all_for_parent(child_ids: set) -> pd.Series:
-    lines = fact_df[fact_df['Product ID'].isin(child_ids)]
-    if lines.empty:
-        return pd.Series(dtype=float)
-    rec = lines.groupby('Receipt No').agg(Date=('Date', 'first'))
-    rec['Date'] = pd.to_datetime(rec['Date'], errors='coerce')
-    return rec.groupby(pd.Grouper(key='Date', freq=AGG_FREQ)).size()
+COMMON_FC_INDEX = pd.date_range(start=latest_actual + step, periods=HORIZON, freq=AGG_FREQ)
 
-a_ts_all = build_ts_all_for_parent(child_ids_a)
-b_ts_all = build_ts_all_for_parent(child_ids_b)
-
-def fit_and_forecast(series: pd.Series, label: str):
+def fit_and_forecast_to_index(series: pd.Series, label: str, idx: pd.DatetimeIndex) -> pd.Series:
+    """Fit Holt-Winters to 'series' and forecast exactly onto 'idx' (RAW, may be negative)."""
     if series is None or series.empty:
-        print(f"\nNo sales found for {label}. Skipping its forecast.")
-        return None, None
+        print(f"\nNo sales found for {label}. Returning zeros on common index.")
+        return pd.Series(0.0, index=idx)
     model = ExponentialSmoothing(
-        series,
-        trend='add',
-        seasonal='add',
-        seasonal_periods=SEASONAL_PERIODS,
-        initialization_method="estimated"
+        series, trend='add', seasonal='add',
+        seasonal_periods=SEASONAL_PERIODS, initialization_method="estimated"
     )
     if OPTIMIZED:
         fitted = model.fit(optimized=True)
@@ -269,71 +209,73 @@ def fit_and_forecast(series: pd.Series, label: str):
             smoothing_seasonal=HW_GAMMA,
             optimized=False
         )
-    fc = fitted.forecast(HORIZON)
-    fc_index = pd.date_range(start=series.index[-1] + step, periods=len(fc), freq=AGG_FREQ)
-    return fc, fc_index
+    fc = fitted.forecast(len(idx))
+    fc.index = idx
+    return fc
 
-# Baseline (pre-bundle) forecasts
-a_fc_all, a_fc_index_all = fit_and_forecast(a_ts_all, f"{parent_a_sku} (ALL children)")
-b_fc_all, b_fc_index_all = fit_and_forecast(b_ts_all, f"{parent_b_sku} (ALL children)")
+# Forecast RAW series (can be negative)
+bundle_fc_raw     = fit_and_forecast_to_index(bundle_sales_ts, "Bundle (baseline)", COMMON_FC_INDEX)
+a_fc_all_raw      = fit_and_forecast_to_index(a_ts_all, f"{product_a_name} (ALL)", COMMON_FC_INDEX)
+b_fc_all_raw      = fit_and_forecast_to_index(b_ts_all, f"{product_b_name} (ALL)", COMMON_FC_INDEX)
 
-# Ensure explicit indices
-if a_fc_all is not None: a_fc_all = a_fc_all.copy(); a_fc_all.index = a_fc_index_all
-if b_fc_all is not None: b_fc_all = b_fc_all.copy(); b_fc_all.index = b_fc_index_all
+# Apply non-negativity for plotting and all downstream math
+bundle_fc     = bundle_fc_raw.clip(lower=0)
+bundle_fc_adj = (bundle_fc_raw * demand_multiplier).clip(lower=0)  # adjust then clamp
 
-# =========================
-# CANNIBALIZATION MODEL (revised; based on baseline bundle units)
-# =========================
-a_fc_all_aligned = (a_fc_all.reindex(bundle_fc_index, fill_value=0)
-                    if a_fc_all is not None else pd.Series(dtype=float, index=bundle_fc_index))
-b_fc_all_aligned = (b_fc_all.reindex(bundle_fc_index, fill_value=0)
-                    if b_fc_all is not None else pd.Series(dtype=float, index=bundle_fc_index))
-
-cannibalization_units = bundle_fc  # baseline bundle units at status-quo price
-
-a_fc_after_aligned = (a_fc_all_aligned - cannibalization_units).clip(lower=0)
-b_fc_after_aligned = (b_fc_all_aligned - cannibalization_units).clip(lower=0)
-
-a_fc_after_for_plot = (a_fc_after_aligned.reindex(a_fc_index_all, fill_value=np.nan)
-                       if a_fc_index_all is not None else None)
-b_fc_after_for_plot = (b_fc_after_aligned.reindex(b_fc_index_all, fill_value=np.nan)
-                       if b_fc_index_all is not None else None)
+a_fc_all = a_fc_all_raw.clip(lower=0)
+b_fc_all = b_fc_all_raw.clip(lower=0)
 
 # =========================
-# REVENUE IMPACT ANALYSIS (revised, parent_sku prices)
+# CANNIBALIZATION MODEL (on COMMON_FC_INDEX)
+#   Use non-negative baseline bundle units to avoid subtracting negatives.
+#   After = baseline - baseline_bundle_units, floored at 0.
 # =========================
-def revenue_forecast(forecast_series, price, idx):
-    if forecast_series is None:
-        return pd.Series(dtype=float, index=idx)
-    return forecast_series.reindex(idx, fill_value=0) * price
+cannibalization_units = bundle_fc  # non-negative
+a_fc_after_aligned = (a_fc_all - cannibalization_units).clip(lower=0)
+b_fc_after_aligned = (b_fc_all - cannibalization_units).clip(lower=0)
 
-# Use representative parent prices computed earlier
-rev_a_before = revenue_forecast(a_fc_all_aligned, price_a, bundle_fc_index)
-rev_b_before = revenue_forecast(b_fc_all_aligned, price_b, bundle_fc_index)
+# =========================
+# REVENUE IMPACT ANALYSIS (on COMMON_FC_INDEX)
+#   Always use clamped (non-negative) series
+# =========================
+def revenue_forecast(series: pd.Series, price: float) -> pd.Series:
+    # series is already clamped to non-negative above
+    return series * price
 
-rev_a_after  = revenue_forecast(a_fc_after_aligned, price_a, bundle_fc_index)
-rev_b_after  = revenue_forecast(b_fc_after_aligned, price_b, bundle_fc_index)
+price_a = float(product_a_match['Price'].iloc[0])
+price_b = float(product_b_match['Price'].iloc[0])
 
-rev_bundle_before = pd.Series(0.0, index=bundle_fc_index)           # no bundle pre-intro
-rev_bundle_after  = bundle_fc_adj * new_price                        # adjusted units at NEW_PRICE
+rev_a_before = revenue_forecast(a_fc_all, price_a)
+rev_b_before = revenue_forecast(b_fc_all, price_b)
 
+rev_a_after  = revenue_forecast(a_fc_after_aligned, price_a)
+rev_b_after  = revenue_forecast(b_fc_after_aligned, price_b)
+
+# Bundle revenue:
+rev_bundle_before = pd.Series(0.0, index=COMMON_FC_INDEX)         # no bundle pre-intro
+rev_bundle_after  = bundle_fc_adj * new_price                      # promo bundle revenue (already clamped)
+
+# Totals
 indiv_rev_before = {"A": float(rev_a_before.sum()), "B": float(rev_b_before.sum())}
 indiv_rev_after  = {"A": float(rev_a_after.sum()),  "B": float(rev_b_after.sum())}
 
 overall_before = indiv_rev_before["A"] + indiv_rev_before["B"]
 overall_after  = indiv_rev_after["A"] + indiv_rev_after["B"] + float(rev_bundle_after.sum())
 
-print("\n--- DETAILED REVENUE IMPACT ANALYSIS (parent_sku, power elasticity) ---")
+# --- PRINT RESULTS ---
+print("\n--- DETAILED REVENUE IMPACT ANALYSIS (Common index, power elasticity, non-negative forecasts) ---")
+bundle_before_total = float(rev_bundle_before.sum())   # 0.0
+bundle_after_total  = float(rev_bundle_after.sum())
+
 print("Individual Revenue Forecast BEFORE Bundling/Cannibalization:")
-print(f"  {parent_a_sku}: Php {indiv_rev_before['A']:.2f}")
-print(f"  {parent_b_sku}: Php {indiv_rev_before['B']:.2f}")
+print(f"  {product_a_name}: Php {indiv_rev_before['A']:.2f}")
+print(f"  {product_b_name}: Php {indiv_rev_before['B']:.2f}")
+print(f"  BUNDLE (status-quo price Php {current_price:.2f}): Php {bundle_before_total:.2f}")
 
 print("\nIndividual Revenue Forecast AFTER Bundling/Cannibalization:")
-print(f"  {parent_a_sku}: Php {indiv_rev_after['A']:.2f}")
-print(f"  {parent_b_sku}: Php {indiv_rev_after['B']:.2f}")
-
-print(f"\nBundled Revenue Forecast BEFORE: Php {float(rev_bundle_before.sum()):.2f} (no bundle)")
-print(f"Bundled Revenue Forecast AFTER  (promo price Php {new_price:.2f}): Php {float(rev_bundle_after.sum()):.2f}")
+print(f"  {product_a_name}: Php {indiv_rev_after['A']:.2f}")
+print(f"  {product_b_name}: Php {indiv_rev_after['B']:.2f}")
+print(f"  BUNDLE (promo price Php {new_price:.2f}): Php {bundle_after_total:.2f}")
 
 print(f"\nOverall Revenue BEFORE (A + B): Php {overall_before:.2f}")
 print(f"Overall Revenue AFTER (A_after + B_after + Bundle_after): Php {overall_after:.2f}")
@@ -343,16 +285,16 @@ impact_pct = (impact_abs / overall_before * 100.0) if overall_before != 0 else f
 print(f"Revenue Impact: Php {impact_abs:.2f} ({impact_pct:.1f}%)")
 
 # =========================
-# BREAK-EVEN BUNDLE UNITS (incremental units to offset loss)
+# BREAK-EVEN BUNDLE UNITS (to offset any overall revenue loss)
 # =========================
 overall_before_series = rev_a_before + rev_b_before
 overall_after_series  = rev_a_after + rev_b_after + rev_bundle_after
-revenue_gap_series    = overall_before_series - overall_after_series
+revenue_gap_series = (overall_before_series - overall_after_series).clip(lower=0)  # gap can't be negative
 
 if new_price <= 0:
     print("\nBreak-even analysis skipped: NEW_PRICE must be > 0.")
 else:
-    needed_bundles_series = (revenue_gap_series / new_price).clip(lower=0)
+    needed_bundles_series = (revenue_gap_series / new_price)
     needed_bundles_ceiling = np.ceil(needed_bundles_series)
 
     total_gap = float(revenue_gap_series.sum())
@@ -368,7 +310,7 @@ else:
         print(f"Surplus: Php {impact_abs:.2f}")
 
     be_df = pd.DataFrame({
-        'Period': bundle_fc_index,
+        'Period': COMMON_FC_INDEX,
         'Revenue_Gap': revenue_gap_series.values.round(2),
         'Bundle_Units_Required_Ceil': needed_bundles_ceiling.astype('Int64').values
     })
@@ -377,50 +319,52 @@ else:
 
 # =========================
 # FUNCTION: detect trend
+#   Use clamped series to match what we plot.
 # =========================
 def detect_trend(series: pd.Series, label: str) -> str:
+    """Determine trend direction (upward, downward, flat) from first vs last values."""
     if series is None or len(series) < 2:
         return f"{label}: No data"
     first_val, last_val = series.iloc[0], series.iloc[-1]
-    if last_val > first_val * 1.05:
+    if last_val > first_val * 1.05:   # >5% increase
         return f"{label}: Upward trend"
-    elif last_val < first_val * 0.95:
+    elif last_val < first_val * 0.95: # >5% decrease
         return f"{label}: Downward trend"
     else:
         return f"{label}: Relatively flat trend"
 
 # =========================
-# TREND ANALYSIS
+# TREND ANALYSIS (clamped)
 # =========================
-print("\n--- TREND ANALYSIS ---")
+print("\n--- TREND ANALYSIS (clamped series) ---")
 print(detect_trend(bundle_fc, "Baseline bundle forecast"))
 print(detect_trend(bundle_fc_adj, "Adjusted bundle forecast (power model)"))
-if a_fc_all is not None:
-    print(detect_trend(a_fc_all, f"{parent_a_sku} baseline forecast"))
-if a_fc_after_for_plot is not None:
-    print(detect_trend(a_fc_after_for_plot.dropna(), f"{parent_a_sku} after cannibalization"))
-if b_fc_all is not None:
-    print(detect_trend(b_fc_all, f"{parent_b_sku} baseline forecast"))
-if b_fc_after_for_plot is not None:
-    print(detect_trend(b_fc_after_for_plot.dropna(), f"{parent_b_sku} after cannibalization"))
+print(detect_trend(a_fc_all, f"{product_a_name} baseline forecast"))
+print(detect_trend(a_fc_after_aligned, f"{product_a_name} after cannibalization"))
+print(detect_trend(b_fc_all, f"{product_b_name} baseline forecast"))
+print(detect_trend(b_fc_after_aligned, f"{product_b_name} after cannibalization"))
 
 # =========================
-# PLOTS (ALL IN ONE FRAME)
+# PLOTS (ALL IN ONE FRAME) — all forecasts on COMMON_FC_INDEX
+#   Plot clamped series so negatives appear as 0 but the seasonal shape is preserved above zero.
 # =========================
 fig, axes = plt.subplots(3, 1, figsize=(14, 16), sharex=False)
+fig.subplots_adjust(hspace=0.2)  # set vertical spacing explicitly
 
-# 1) Bundle subplot
+# 1) Bundle subplot (historical + forecasts on common index)
 axes[0].plot(bundle_sales_ts.index, bundle_sales_ts.values,
              label=f'Historical ({AGG_FREQ})', marker='o')
-axes[0].plot(bundle_fc_index, bundle_fc.values,
+axes[0].plot(COMMON_FC_INDEX, bundle_fc.values,
              label='Baseline Bundle Forecast (units, status-quo price)', linestyle='--', marker='s')
-axes[0].plot(bundle_fc_index, bundle_fc_adj.values,
+axes[0].plot(COMMON_FC_INDEX, bundle_fc_adj.values,
              label=f'Adjusted Bundle Forecast at Php {new_price:.0f}', linestyle='--', marker='s')
-axes[0].plot([bundle_sales_ts.index[-1], bundle_fc_index[0]],
-             [bundle_sales_ts.values[-1], bundle_fc.values[0]],
-             color='gray', linestyle=':', linewidth=2)
+# connector from last actual to first forecast (baseline)
+if not bundle_sales_ts.empty:
+    axes[0].plot([bundle_sales_ts.index[-1], COMMON_FC_INDEX[0]],
+                 [bundle_sales_ts.values[-1], bundle_fc.values[0]],
+                 color='gray', linestyle=':', linewidth=2)
 axes[0].set_title(
-    f'Bundle Forecast: {parent_a_sku} + {parent_b_sku}\n'
+    f'Bundle Forecast: {product_a_name} + {product_b_name}\n'
     f'Elasticity-adj demand change (power): {expected_demand_change_pct:.1f}% | '
     f'Old price: Php {current_price:.2f} → New price: Php {new_price:.2f}'
 )
@@ -428,52 +372,39 @@ axes[0].set_ylabel('Bundle Sales (units)')
 axes[0].grid(True)
 axes[0].legend(loc='best')
 
-# 2) Product A subplot
+# 2) Product A subplot (baseline vs after) on common index
 if not a_ts_all.empty:
     axes[1].plot(a_ts_all.index, a_ts_all.values,
-                 label=f'Historical {parent_a_sku} ({AGG_FREQ})', marker='o')
-if a_fc_all is not None:
-    axes[1].plot(a_fc_index_all, a_fc_all.values,
-                 label='Baseline Forecast (pre-bundle)', linestyle='--', marker='s')
-if a_fc_after_for_plot is not None:
-    axes[1].plot(a_fc_index_all, a_fc_after_for_plot.values,
-                 label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
-    if not a_ts_all.empty:
-        axes[1].plot([a_ts_all.index[-1], a_fc_index_all[0]],
-                     [a_ts_all.values[-1], a_fc_all.values[0]],
-                     color='gray', linestyle=':', linewidth=2)
-        axes[1].plot([a_ts_all.index[-1], a_fc_index_all[0]],
-                     [a_ts_all.values[-1], a_fc_after_for_plot.values[0]],
-                     color='green', linestyle=':', linewidth=2)
-
-axes[1].set_title(f'Product A Forecasts: {parent_a_sku} — Baseline vs After Cannibalization')
-axes[1].set_ylabel('Receipts with Product A (parent_sku)')
+                 label=f'Historical {product_a_name} ({AGG_FREQ})', marker='o')
+axes[1].plot(COMMON_FC_INDEX, a_fc_all.values,
+             label='Baseline Forecast (pre-bundle, clamped ≥0)', linestyle='--', marker='s')
+axes[1].plot(COMMON_FC_INDEX, a_fc_after_aligned.values,
+             label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
+if not a_ts_all.empty:
+    axes[1].plot([a_ts_all.index[-1], COMMON_FC_INDEX[0]],
+                 [a_ts_all.values[-1], a_fc_all.values[0]],
+                 color='gray', linestyle=':', linewidth=2)
+axes[1].set_title(f'Product A Forecasts: {product_a_name} — Baseline vs After Cannibalization')
+axes[1].set_ylabel('Receipts with Product A')
 axes[1].grid(True)
 axes[1].legend(loc='best')
 
-# 3) Product B subplot
+# 3) Product B subplot (baseline vs after) on common index
 if not b_ts_all.empty:
     axes[2].plot(b_ts_all.index, b_ts_all.values,
-                 label=f'Historical {parent_b_sku} ({AGG_FREQ})', marker='o')
-if b_fc_all is not None:
-    axes[2].plot(b_fc_index_all, b_fc_all.values,
-                 label='Baseline Forecast (pre-bundle)', linestyle='--', marker='s')
-if b_fc_after_for_plot is not None:
-    axes[2].plot(b_fc_index_all, b_fc_after_for_plot.values,
-                 label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
-    if not b_ts_all.empty:
-        axes[2].plot([b_ts_all.index[-1], b_fc_index_all[0]],
-                     [b_ts_all.values[-1], b_fc_all.values[0]],
-                     color='gray', linestyle=':', linewidth=2)
-        axes[2].plot([b_ts_all.index[-1], b_fc_index_all[0]],
-                     [b_ts_all.values[-1], b_fc_after_for_plot.values[0]],
-                     color='green', linestyle=':', linewidth=2)
-
-axes[2].set_title(f'Product B Forecasts: {parent_b_sku} — Baseline vs After Cannibalization')
+                 label=f'Historical {product_b_name} ({AGG_FREQ})', marker='o')
+axes[2].plot(COMMON_FC_INDEX, b_fc_all.values,
+             label='Baseline Forecast (pre-bundle, clamped ≥0)', linestyle='--', marker='s')
+axes[2].plot(COMMON_FC_INDEX, b_fc_after_aligned.values,
+             label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
+if not b_ts_all.empty:
+    axes[2].plot([b_ts_all.index[-1], COMMON_FC_INDEX[0]],
+                 [b_ts_all.values[-1], b_fc_all.values[0]],
+                 color='gray', linestyle=':', linewidth=2)
+axes[2].set_title(f'Product B Forecasts: {product_b_name} — Baseline vs After Cannibalization')
 axes[2].set_xlabel('Period')
-axes[2].set_ylabel('Receipts with Product B (parent_sku)')
+axes[2].set_ylabel('Receipts with Product B')
 axes[2].grid(True)
 axes[2].legend(loc='best')
 
-plt.tight_layout()
 plt.show()
