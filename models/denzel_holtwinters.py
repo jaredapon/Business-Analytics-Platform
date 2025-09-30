@@ -14,7 +14,7 @@ FACT_PATH    = 'etl_dimensions/fact_transaction_dimension.csv'
 PRODUCT_PATH = 'etl_dimensions/current_product_dimension.csv'
 
 # Bundle selection (row in association_rules.csv to analyze)
-BUNDLE_ROW = 2
+BUNDLE_ROW = 1
 
 # Time-series settings
 AGG_FREQ = 'QE'            # 'QE' = Quarter End; (e.g., 'MS' for Month Start)
@@ -28,7 +28,7 @@ HW_BETA  = 0.2
 HW_GAMMA = 0.2
 
 # Price scenario
-NEW_PRICE = 410.4         # promotional bundle price you want to test
+NEW_PRICE = 419.4         # promotional bundle price you want to test
 
 # =========================
 # LOAD BUNDLE FROM RULES
