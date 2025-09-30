@@ -1,4 +1,4 @@
-## Capstone Business Analytics
+## Capstone Business Analytics Project
 
 Pipeline for restaurant Excel sales data  
 ETL + Market Basket Analysis + Holt-Winter's Forecasting Method with PED and Log-Log Model + Prescriptive Analytics
