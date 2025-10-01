@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# denzel_holtwinters_summary_aligned.py
-#
-# Summary of Holt–Winters results for TOP_N bundles, aligned with the in-depth script:
-#  - Resolve products by EXACT product_name
-#  - Build one COMMON_FC_INDEX from the latest actual among bundle/A/B
-#  - No asfreq() padding (sparse series allowed, like the in-depth file)
-#  - Elasticity: apply power model to RAW bundle forecast, THEN clip
-#  - Cannibalization uses non-negative baseline bundle units
-#  - Revenue math on the COMMON_FC_INDEX
-
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
