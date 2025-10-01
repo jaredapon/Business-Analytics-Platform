@@ -22,7 +22,7 @@ TOP_N = 15
 # Time-series settings
 AGG_FREQ = 'QE'            # 'QE' Quarter End; ('MS' for Month Start, etc.)
 SEASONAL_PERIODS = 4       # 4 for quarterly, 12 for monthly, etc.
-HORIZON = 5                # number of future periods to forecast
+HORIZON = 4                # number of future periods to forecast
 
 # Holt–Winters smoothing (set OPTIMIZED=True to ignore the fixed alphas)
 OPTIMIZED = False
