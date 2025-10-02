@@ -1,25 +1,43 @@
-import { useState } from 'react'
-import './App.css'
+import { useState } from 'react';
+import Navigation from './components/Navigation';
+import Dashboard from './components/Dashboard';
+import DataUpload from './components/DataUpload';
+import './App.css';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [currentPage, setCurrentPage] = useState('dashboard');
+
+  const renderCurrentPage = () => {
+    switch (currentPage) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'upload':
+        return <DataUpload />;
+      case 'settings':
+        return (
+          <div style={{ padding: '2rem' }}>
+            <h1>Settings</h1>
+            <p>Settings page coming soon...</p>
+          </div>
+        );
+      default:
+        return <Dashboard />;
+    }
+  };
 
   return (
-    <>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="App">
+      <Navigation
+        currentPage={currentPage}
+        onPageChange={setCurrentPage}
+        userName="Book Latte"
+      />
+      
+      <main className="main-content">
+        {renderCurrentPage()}
+      </main>
+    </div>
+  );
 }
 
-export default App
+export default App;
