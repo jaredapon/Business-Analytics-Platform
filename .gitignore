@@ -46,3 +46,17 @@ Thumbs.db
 
 # Environmental variable
 .env
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
