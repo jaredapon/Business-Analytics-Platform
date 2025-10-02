@@ -10,8 +10,7 @@ minio_client = Minio(
     secret_key="password",
     secure=False
 )
-
-@app.get("/presigned-url/")
+@app.get("/presigned-url/") 
 def get_presigned_url(bucket: str, object_name: str, expires: int = 3600):
     try:
         url = minio_client.presigned_get_object(bucket, object_name, expires=expires)
