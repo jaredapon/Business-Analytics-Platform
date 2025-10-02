@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { 
   MdUploadFile, 
-  MdClose, 
   MdDelete,
   MdDescription,
   MdTableChart,
@@ -32,6 +31,30 @@ export const DataUpload: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
+  const [showRemoveSelectedConfirm, setShowRemoveSelectedConfirm] = useState(false);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+  const [filePendingRemoval, setFilePendingRemoval] = useState<FileWithPreview | null>(null);
+
+  const cleanFileName = useCallback((name: string) => {
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }, []);
+
+  const getExtension = (name: string) => name.split('.').pop()?.toLowerCase() || 'unknown';
+
+  const getDisplayName = useCallback((name: string) => {
+    const base = cleanFileName(name);
+    const ext = getExtension(name);
+    return ext === 'unknown' ? base : `${base}.${ext}`;
+  }, [cleanFileName]);
+
+  const formatBytes = useCallback((bytes: number) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${bytes} B`;
+  }, []);
 
   const generateFileId = () => `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -117,18 +140,42 @@ export const DataUpload: React.FC = () => {
     }
   }, [processFiles]);
 
+  // Internal single remove logic and also update selected set
   const removeFile = useCallback((fileId: string) => {
     setFiles(prev => prev.filter(file => file.id !== fileId));
+    setSelectedFileIds(prev => {
+      const next = new Set(prev);
+      next.delete(fileId);
+      return next;
+    });
     setErrors(prev => prev.filter(error => !error.includes(files.find(f => f.id === fileId)?.name || '')));
   }, [files]);
 
+  // Clear all files
   const clearAllFiles = useCallback(() => {
     setFiles([]);
     setErrors([]);
+    setSelectedFileIds(new Set());
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   }, []);
+
+  // Selection helpers
+  const isSelected = useCallback((id: string) => selectedFileIds.has(id), [selectedFileIds]);
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedFileIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const selectAll = useCallback(() => {
+    setSelectedFileIds(new Set(files.map(f => f.id)));
+  }, [files]);
+  const clearSelection = useCallback(() => setSelectedFileIds(new Set()), []);
+  const allSelected = files.length > 0 && selectedFileIds.size === files.length;
 
   const handleUpload = useCallback(async () => {
     if (files.length === 0) return;
@@ -186,6 +233,34 @@ export const DataUpload: React.FC = () => {
     fileInputRef.current?.click();
   };
 
+  // Bulk remove selected confirm action
+  const confirmRemoveSelected = () => {
+    setFiles(prev => prev.filter(f => !selectedFileIds.has(f.id)));
+    setSelectedFileIds(new Set());
+    setShowRemoveSelectedConfirm(false);
+  };
+
+  // Single file remove confirm action
+  const confirmRemoveSingle = () => {
+    if (!filePendingRemoval) return;
+    removeFile(filePendingRemoval.id);
+    setFilePendingRemoval(null);
+  };
+
+  // Clear all confirm action
+  const confirmClearAll = () => {
+    clearAllFiles();
+    setShowClearAllConfirm(false);
+  };
+
+  // Helpers
+  const totalSizeFormatted = formatBytes(files.reduce((sum, f) => sum + f.size, 0));
+  const typeCounts = files.reduce<Record<string, number>>((acc, f) => {
+    const ext = getExtension(f.name);
+    acc[ext] = (acc[ext] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div className={styles.dataUploadContainer}>
       <div className={styles.dataUploadHeader}>
@@ -224,7 +299,7 @@ export const DataUpload: React.FC = () => {
         
         <div className={styles.dataUploadDropZoneContent}>
           <div className={styles.dataUploadIcon}>
-            <MdUploadFile size={48} />
+            <MdUploadFile size={48} color="black"/>
           </div>
           <h3>Drop files here or click to browse</h3>
           <p>Support for CSV and Excel files</p>
@@ -238,35 +313,79 @@ export const DataUpload: React.FC = () => {
       {files.length > 0 && (
         <div className={styles.dataUploadFileList}>
           <div className={styles.dataUploadFileListHeader}>
-            <h3>Selected Files ({files.length})</h3>
-            <button 
-              className={styles.dataUploadClearAllButton} 
-              onClick={clearAllFiles}
-              disabled={isUploading}
-            >
-              <MdDelete style={{ marginRight: '4px' }} />
-              Clear All
-            </button>
+            <div className={styles.dataUploadFileListHeaderLeft}>
+              <h3>Selected Files ({files.length})</h3>
+              <label className={styles.dataUploadSelectAll}>
+                <input
+                  type="checkbox"
+                  className={styles.dataUploadFileCheckbox}
+                  checked={allSelected}
+                  onChange={() => (allSelected ? clearSelection() : selectAll())}
+                />
+                <span style={{ marginRight: '0.5rem' }}>
+                  {allSelected ? 'Unselect all' : 'Select all'}
+                </span>
+              </label>
+            </div>
+            <div className={styles.dataUploadHeaderActions}>
+              <button
+                className={styles.dataUploadSecondaryButton}
+                onClick={openFileDialog}
+                disabled={isUploading}
+              >
+                Add Files
+              </button>
+              <button
+                className={styles.dataUploadClearAllButton}
+                onClick={() => setShowRemoveSelectedConfirm(true)}
+                disabled={isUploading || selectedFileIds.size === 0}
+                title={selectedFileIds.size === 0 ? 'No files selected' : `Remove ${selectedFileIds.size} selected`}
+              >
+                <MdDelete style={{ marginRight: '4px' }} />
+                Remove Selected
+              </button>
+              <button
+                className={styles.dataUploadClearAllButton}
+                onClick={() => setShowClearAllConfirm(true)}
+                disabled={isUploading}
+              >
+                <MdDelete style={{ marginRight: '4px' }} />
+                Clear All
+              </button>
+            </div>
           </div>
-          
+
           <div className={styles.dataUploadFileItems}>
             {files.map((file) => (
-              <div key={file.id} className={styles.dataUploadFileItem}>
+              <div
+                key={file.id}
+                className={`${styles.dataUploadFileItem} ${isSelected(file.id) ? styles.selected : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  className={styles.dataUploadFileCheckbox}
+                  checked={isSelected(file.id)}
+                  onChange={() => toggleSelect(file.id)}
+                  aria-label={`Select ${file.name}`}
+                />
                 <div className={styles.dataUploadFileIcon}>
                   {getFileIcon(file.name)}
                 </div>
-                
+
                 <div className={styles.dataUploadFileDetails}>
-                  <div className={styles.dataUploadFileName}>{file.name}</div>
-                  <div className={styles.dataUploadFileMetadata}>
-                    <span>{(file.size / 1024 / 1024).toFixed(2)} MB</span>
-                    <span>•</span>
-                    <span>{file.type || 'Unknown type'}</span>
+                  <div
+                    className={styles.dataUploadFileName}
+                    title={file.name}
+                  >
+                    {getDisplayName(file.name)}
                   </div>
-                  
+                  <div className={styles.dataUploadFileMetadata}>
+                    <span>{formatBytes(file.size)}</span>
+                  </div>
+
                   {uploadProgress[file.id] !== undefined && (
                     <div className={styles.dataUploadProgressBar}>
-                      <div 
+                      <div
                         className={styles.dataUploadProgressFill}
                         style={{ width: `${uploadProgress[file.id]}%` }}
                       />
@@ -276,14 +395,15 @@ export const DataUpload: React.FC = () => {
                     </div>
                   )}
                 </div>
-                
+
                 <button
                   className={styles.dataUploadRemoveButton}
-                  onClick={() => removeFile(file.id)}
+                  onClick={() => setFilePendingRemoval(file)}
                   disabled={isUploading}
                   aria-label={`Remove ${file.name}`}
+                  title="Remove file"
                 >
-                  <MdClose />
+                  x
                 </button>
               </div>
             ))}
@@ -304,30 +424,59 @@ export const DataUpload: React.FC = () => {
         </div>
       )}
 
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal - Upload (redesigned content) */}
       <ConfirmationModal
         isOpen={showConfirmation}
-        title="Confirm Upload"
+        title="Review and Confirm Upload"
         message={
           <div>
-            <p>You are about to upload <strong>{files.length}</strong> file(s):</p>
+            <div className={styles.dataUploadConfirmSummary}>
+              <div className={styles.dataUploadStat}>
+                <div className={styles.dataUploadStatLabel}>Total Files</div>
+                <div className={styles.dataUploadStatValue}>{files.length}</div>
+              </div>
+              <div className={styles.dataUploadStat}>
+                <div className={styles.dataUploadStatLabel}>Total Size</div>
+                <div className={styles.dataUploadStatValue}>{totalSizeFormatted}</div>
+              </div>
+              <div className={styles.dataUploadStat}>
+                <div className={styles.dataUploadStatLabel}>By Type</div>
+                <div className={styles.dataUploadStatValue}>
+                  {Object.entries(typeCounts).map(([ext, count], i) => (
+                    <span key={ext}>
+                      {ext.toUpperCase()}: {count}{i < Object.entries(typeCounts).length - 1 ? ' • ' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.dataUploadDivider} />
+
             <div className={styles.dataUploadFileReviewList}>
               {files.map((file) => (
                 <div key={file.id} className={styles.dataUploadFileReviewItem}>
                   <div className={styles.dataUploadFileInfo}>
-                    <span className={styles.dataUploadFileName}>{file.name}</span>
+                    <span className={styles.dataUploadFileName} title={file.name}>
+                      {getDisplayName(file.name)}
+                    </span>
                     <span className={styles.dataUploadFileSize}>
-                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                      {formatBytes(file.size)}
                     </span>
                   </div>
                   <span className={styles.dataUploadFileType}>
-                    {file.type || 'Unknown'}
+                    {getExtension(file.name).toUpperCase()
+                    }
                   </span>
                 </div>
               ))}
             </div>
+
             <div className={styles.dataUploadWarning}>
-              <p><MdWarning style={{ marginRight: '8px', verticalAlign: 'middle' }} />This action cannot be undone. Please review your files before proceeding.</p>
+              <p>
+                <MdWarning style={{ marginRight: '8px', verticalAlign: 'middle' }} />
+                Please verify file names, sizes, and types before uploading. This action cannot be undone.
+              </p>
             </div>
           </div>
         }
@@ -336,6 +485,79 @@ export const DataUpload: React.FC = () => {
         onCancel={() => setShowConfirmation(false)}
         isLoading={isUploading}
         variant="warning"
+      />
+
+      {/* Confirmation Modal - Remove Selected */}
+      <ConfirmationModal
+        isOpen={showRemoveSelectedConfirm}
+        title="Remove selected files?"
+        message={
+          <div>
+            <p>You are about to remove {selectedFileIds.size} file(s):</p>
+            <div className={styles.dataUploadFileReviewList}>
+              {files.filter(f => selectedFileIds.has(f.id)).map(f => (
+                <div key={f.id} className={styles.dataUploadFileReviewItem}>
+                  <div className={styles.dataUploadFileInfo}>
+                    <span className={styles.dataUploadFileName} title={f.name}>
+                      {getDisplayName(f.name)}
+                    </span>
+                    <span className={styles.dataUploadFileSize}>
+                      {formatBytes(f.size)}
+                    </span>
+                  </div>
+                  <span className={styles.dataUploadFileType}>{getExtension(f.name).toUpperCase()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+        confirmText="Remove"
+        onConfirm={confirmRemoveSelected}
+        onCancel={() => setShowRemoveSelectedConfirm(false)}
+        isLoading={false}
+        variant="danger"
+      />
+
+      {/* Confirmation Modal - Clear All */}
+      <ConfirmationModal
+        isOpen={showClearAllConfirm}
+        title="Clear all files?"
+        message={<p>This will remove all selected files from the list. This action cannot be undone.</p>}
+        confirmText="Clear All"
+        onConfirm={confirmClearAll}
+        onCancel={() => setShowClearAllConfirm(false)}
+        isLoading={false}
+        variant="danger"
+      />
+
+      {/* Confirmation Modal - Single Remove */}
+      <ConfirmationModal
+        isOpen={!!filePendingRemoval}
+        title="Remove file?"
+        message={
+          filePendingRemoval ? (
+            <div className={styles.dataUploadFileReviewList}>
+              <div className={styles.dataUploadFileReviewItem}>
+                <div className={styles.dataUploadFileInfo}>
+                  <span className={styles.dataUploadFileName} title={filePendingRemoval.name}>
+                    {getDisplayName(filePendingRemoval.name)}
+                  </span>
+                  <span className={styles.dataUploadFileSize}>
+                    {formatBytes(filePendingRemoval.size)}
+                  </span>
+                </div>
+                <span className={styles.dataUploadFileType}>
+                  {getExtension(filePendingRemoval.name).toUpperCase()}
+                </span>
+              </div>
+            </div>
+          ) : null
+        }
+        confirmText="Remove"
+        onConfirm={confirmRemoveSingle}
+        onCancel={() => setFilePendingRemoval(null)}
+        isLoading={false}
+        variant="danger"
       />
     </div>
   );

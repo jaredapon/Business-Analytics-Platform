@@ -9,6 +9,7 @@
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #2d3748;
 }
 
 .dataUploadHeader {
@@ -184,77 +185,116 @@
   font-size: 1.5rem;
   min-width: 2rem;
   text-align: center;
-}
-
-.dataUploadFileDetails {
-  flex: 1;
-  min-width: 0;
-}
-
-.dataUploadFileName {
-  font-weight: 500;
+  /* Ensure icons are visible on light backgrounds */
   color: #2d3748;
-  margin-bottom: 0.25rem;
-  word-break: break-word;
 }
 
-.dataUploadFileMetadata {
+.selected {
+  background-color: #ebf8ff;
+  border-color: #90cdf4;
+}
+
+.dataUploadFileListHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dataUploadHeaderActions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.875rem;
-  color: #718096;
 }
 
-.dataUploadProgressBar {
-  margin-top: 0.5rem;
-  position: relative;
-  height: 0.5rem;
-  background-color: #e2e8f0;
-  border-radius: 0.25rem;
-  overflow: hidden;
-}
-
-.dataUploadProgressFill {
-  height: 100%;
-  background-color: #48bb78;
-  transition: width 0.3s ease;
-  border-radius: 0.25rem;
-}
-
-.dataUploadProgressText {
-  position: absolute;
-  top: -1.5rem;
-  right: 0;
-  font-size: 0.75rem;
-  color: #4a5568;
-  font-weight: 500;
-}
-
-.dataUploadRemoveButton {
-  background-color: #e53e3e;
-  color: white;
-  border: none;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 1.125rem;
-  font-weight: bold;
-  display: flex;
+.dataUploadSelectAll {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  color: #4a5568;
+}
+
+.dataUploadFileCheckbox {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #cbd5e0;
+  border-radius: 0.25rem;
+  background: #ffffff;
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.dataUploadFileCheckbox:hover {
+  border-color: #a0aec0;
+}
+.dataUploadFileCheckbox:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.25);
+  border-color: #3182ce;
+}
+.dataUploadFileCheckbox:checked {
+  border-color: #3182ce;
+  /* draw a checkmark */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%233182ce' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 80% 80%;
+}
+
+/* Secondary button (Add Files) */
+.dataUploadSecondaryButton {
+  background-color: #edf2f7;
+  color: #2d3748;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
   transition: background-color 0.2s;
-  flex-shrink: 0;
 }
-
-.dataUploadRemoveButton:hover:not(:disabled) {
-  background-color: #c53030;
+.dataUploadSecondaryButton:hover:not(:disabled) {
+  background-color: #e2e8f0;
 }
-
-.dataUploadRemoveButton:disabled {
-  background-color: #a0aec0;
+.dataUploadSecondaryButton:disabled {
+  background-color: #e2e8f0;
+  opacity: 0.7;
   cursor: not-allowed;
+}
+
+/* Improved upload confirm summary */
+.dataUploadConfirmSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.dataUploadStat {
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.dataUploadStatLabel {
+  font-size: 0.75rem;
+  color: #718096;
+  margin-bottom: 0.25rem;
+}
+
+.dataUploadStatValue {
+  font-weight: 600;
+  color: #2d3748;
+  word-break: break-word;
+}
+
+.dataUploadDivider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 1rem 0;
 }
 
 /* Upload Actions */
@@ -319,6 +359,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  color: #2d3748; /* Ensure modal text is readable */
 }
 
 .dataUploadModalHeader {
@@ -510,5 +551,63 @@
   
   .dataUploadModalActions button {
     width: 100%;
+  }
+  
+  .dataUploadConfirmSummary {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dataUploadFileDetails {
+  flex: 1;
+  min-width: 0;
+}
+
+.dataUploadFileName {
+  font-weight: 500;
+  color: #2d3748;
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dataUploadFileMetadata {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #718096;
+}
+
+.dataUploadRemoveButton {
+  background-color: #e2e8f0;
+  color: rgb(43, 43, 43);
+  border: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 0.25rem; 
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s;
+  flex-shrink: 0;
+  margin-left: auto; 
+}
+.dataUploadRemoveButton:hover:not(:disabled) {
+  background-color: #cbd5e0;
+}
+.dataUploadRemoveButton:disabled {
+  background-color: #edf2f7;
+  color: #a0aec0;
+  cursor: not-allowed;
+}
+
+/* Optional: keep the X at top-right on stacked mobile layout */
+@media (max-width: 768px) {
+  .dataUploadRemoveButton {
+    align-self: flex-end;
   }
 }
