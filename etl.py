@@ -57,68 +57,30 @@ def process_product_file(file_path):
     return df
 
 def create_time_dimension(date_series):
-    """Create hierarchical time dimension from date series"""
-    # Ensure datetime
-    dates = pd.to_datetime(date_series.dropna().unique())
-    df = pd.DataFrame({'date': dates})
-    df['year'] = df['date'].dt.year
-    df['halfyear'] = np.where(df['date'].dt.month <= 6, 1, 2)
-    df['quarter'] = df['date'].dt.quarter
-    df['month'] = df['date'].dt.month
-    df['day'] = df['date'].dt.day
-
-    # Year level
-    year_df = df[['year']].drop_duplicates().copy()
-    year_df['time_id'] = 'Y' + year_df['year'].astype(str)
-    year_df['time_desc'] = year_df['year'].astype(str)
-    year_df['time_level'] = 4
-    year_df['parent_id'] = None
-
-    # Halfyear level
-    halfyear_df = df[['year', 'halfyear']].drop_duplicates().copy()
-    halfyear_df['time_id'] = 'HY' + halfyear_df['year'].astype(str) + halfyear_df['halfyear'].astype(str)
-    halfyear_df['time_desc'] = halfyear_df['year'].astype(str) + ', half ' + halfyear_df['halfyear'].astype(str)
-    halfyear_df['time_level'] = 3
-    halfyear_df['parent_id'] = 'Y' + halfyear_df['year'].astype(str)
-
-    # Quarter level
-    quarter_df = df[['year', 'halfyear', 'quarter']].drop_duplicates().copy()
-    quarter_df['time_id'] = 'Q' + quarter_df['year'].astype(str) + quarter_df['halfyear'].astype(str) + quarter_df['quarter'].astype(str)
-    quarter_df['time_desc'] = quarter_df['year'].astype(str) + ', half ' + quarter_df['halfyear'].astype(str) + ', quarter ' + quarter_df['quarter'].astype(str)
-    quarter_df['time_level'] = 2
-    quarter_df['parent_id'] = 'HY' + quarter_df['year'].astype(str) + quarter_df['halfyear'].astype(str)
-
-    # Month level
-    month_df = df[['year', 'halfyear', 'quarter', 'month']].drop_duplicates().copy()
-    month_df['time_id'] = 'MO' + month_df['year'].astype(str) + month_df['halfyear'].astype(str) + month_df['quarter'].astype(str) + month_df['month'].astype(str).str.zfill(2)
-    month_df['time_desc'] = month_df['year'].astype(str) + ', half ' + month_df['halfyear'].astype(str) + ', quarter ' + month_df['quarter'].astype(str) + ', month ' + month_df['month'].astype(str)
-    month_df['time_level'] = 1
-    month_df['parent_id'] = 'Q' + month_df['year'].astype(str) + month_df['halfyear'].astype(str) + month_df['quarter'].astype(str)
-
-    # Day level
-    day_df = df[['year', 'halfyear', 'quarter', 'month', 'day']].drop_duplicates().copy()
-    day_df['time_id'] = 'D' + day_df['year'].astype(str) + day_df['halfyear'].astype(str) + day_df['quarter'].astype(str) + day_df['month'].astype(str).str.zfill(2) + day_df['day'].astype(str).str.zfill(2)
-    day_df['time_desc'] = (
-        day_df['year'].astype(str) + ', half ' + day_df['halfyear'].astype(str) +
-        ', quarter ' + day_df['quarter'].astype(str) + ', month ' + day_df['month'].astype(str) +
-        ', day ' + day_df['day'].astype(str)
-    )
-    day_df['time_level'] = 0
-    day_df['parent_id'] = (
-        'MO' + day_df['year'].astype(str) + day_df['halfyear'].astype(str) +
-        day_df['quarter'].astype(str) + day_df['month'].astype(str).str.zfill(2)
-    )
-
-    # Combine all levels
-    time_dim = pd.concat([
-        year_df[['time_id', 'time_desc', 'time_level', 'parent_id']],
-        halfyear_df[['time_id', 'time_desc', 'time_level', 'parent_id']],
-        quarter_df[['time_id', 'time_desc', 'time_level', 'parent_id']],
-        month_df[['time_id', 'time_desc', 'time_level', 'parent_id']],
-        day_df[['time_id', 'time_desc', 'time_level', 'parent_id']]
-    ], ignore_index=True).sort_values(['time_level', 'time_id'], ascending=[False, True])
-
-    return time_dim
+    """
+    Create a time dimension with hours (1-23) and minutes (00-59).
+    Columns: time_id, time_desc, time_level, parent_id
+    """
+    hour_rows = []
+    for h in range(1, 24):
+        hour_rows.append({
+            'time_id': f'H{h:02}',
+            'time_desc': f'{h:02}',
+            'time_level': 1,
+            'parent_id': 'NA'
+        })
+    minute_rows = []
+    for h in range(1, 24):
+        for m in range(0, 60):
+            minute_rows.append({
+                'time_id': f'H{h:02}M{m:02}',
+                'time_desc': f'{h:02}:{m:02}',
+                'time_level': 0,
+                'parent_id': f'H{h:02}'
+            })
+    time_dim = hour_rows + minute_rows
+    import pandas as pd
+    return pd.DataFrame(time_dim)
 
 def create_product_dimensions(combined_df):
     """
