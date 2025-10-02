@@ -448,21 +448,46 @@ def load(combined_df):
     os.makedirs('etl_dimensions', exist_ok=True)
     
     if not combined_df.empty:
-        # Reorder columns to start with the specified order
+        # --- Create time dimension first ---
+        if 'Date' in combined_df.columns:
+            print("Creating time_dimension.csv...")
+            time_dim_df = create_time_dimension(combined_df['Date'])
+            time_dim_df.to_csv('etl_dimensions/time_dimension.csv', index=False)
+            print("etl_dimensions/time_dimension.csv created")
+        
+        # --- Map each transaction's time to its time_id ---
+        def time_to_id(time_str):
+            try:
+                # Accept formats like "13:24" or "1324"
+                s = str(time_str).strip()
+                if ':' in s:
+                    h, m = s.split(':')
+                elif len(s) == 4 and s.isdigit():
+                    h, m = s[:2], s[2:]
+                else:
+                    return None
+                return f'H{int(h):02}M{int(m):02}'
+            except Exception:
+                return None
+
+        if 'Time' in combined_df.columns:
+            combined_df['time_id'] = combined_df['Time'].apply(time_to_id)
+        else:
+            combined_df['time_id'] = None
+
+        # Reorder columns to start with the specified order, replacing 'Time' with 'time_id'
         priority_columns = [
-            'Date', 'Time', 'Receipt No', 'Product ID', 'Product Name', 
+            'Date', 'time_id', 'Receipt No', 'Product ID', 'Product Name', 
             'Qty', 'Price', 'Line Total', 'Net Total'
         ]
-        
-        # Get existing columns that match our priority list
         existing_priority = [col for col in priority_columns if col in combined_df.columns]
-        
-        # Get remaining columns (excluding those already in priority list)
-        remaining_columns = [col for col in combined_df.columns if col not in existing_priority]
-        
-        # Create final column order
+        remaining_columns = [col for col in combined_df.columns if col not in existing_priority and col != 'Time']
         final_column_order = existing_priority + remaining_columns
-        
+
+        # Remove the original 'Time' column
+        if 'Time' in combined_df.columns:
+            combined_df = combined_df.drop(columns=['Time'])
+
         # Reorder the dataframe
         combined_df = combined_df[final_column_order]
         
@@ -483,9 +508,7 @@ def load(combined_df):
             parent_map = dict(zip(current_product_dim['product_id'].astype(str), current_product_dim['parent_sku'].astype(str)))
 
         # Create transaction_records.csv: one row per receipt with aggregated parent_sku list
-        # New spec: columns should be 'Receipt No','SKU' (SKU holds comma-separated parent_sku values)
         if 'Receipt No' in combined_df.columns and 'Product ID' in combined_df.columns:
-            # Make an explicit copy before adding helper column to silence potential SettingWithCopy warnings
             combined_df = combined_df.copy()
             parent_sku_series = (
                 combined_df['Product ID'].astype(str)
@@ -512,13 +535,6 @@ def load(combined_df):
             print("etl_dimensions/history_product_dimension.csv created")
             print(f"Current Product Dimension: {len(current_product_dim)} products")
             print(f"History Product Dimension: {len(history_product_dim)} product records")
-
-        # Create time dimension
-        if 'Date' in combined_df.columns:
-            print("Creating time_dimension.csv...")
-            time_dim_df = create_time_dimension(combined_df['Date'])
-            time_dim_df.to_csv('etl_dimensions/time_dimension.csv', index=False)
-            print("etl_dimensions/time_dimension.csv created")
             
     else:
         print("Warning: Combined dataframe is empty, no output files created")
