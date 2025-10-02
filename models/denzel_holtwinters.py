@@ -377,9 +377,9 @@ if not a_ts_all.empty:
     axes[1].plot(a_ts_all.index, a_ts_all.values,
                  label=f'Historical {product_a_name} ({AGG_FREQ})', marker='o')
 axes[1].plot(COMMON_FC_INDEX, a_fc_all.values,
-             label='Baseline Forecast (pre-bundle, clamped ≥0)', linestyle='--', marker='s')
+             label='Baseline Forecast', linestyle='--', marker='s')
 axes[1].plot(COMMON_FC_INDEX, a_fc_after_aligned.values,
-             label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
+             label='After Cannibalization', linestyle='--', marker='^')
 if not a_ts_all.empty:
     axes[1].plot([a_ts_all.index[-1], COMMON_FC_INDEX[0]],
                  [a_ts_all.values[-1], a_fc_all.values[0]],
@@ -394,9 +394,9 @@ if not b_ts_all.empty:
     axes[2].plot(b_ts_all.index, b_ts_all.values,
                  label=f'Historical {product_b_name} ({AGG_FREQ})', marker='o')
 axes[2].plot(COMMON_FC_INDEX, b_fc_all.values,
-             label='Baseline Forecast (pre-bundle, clamped ≥0)', linestyle='--', marker='s')
+             label='Baseline Forecast', linestyle='--', marker='s')
 axes[2].plot(COMMON_FC_INDEX, b_fc_after_aligned.values,
-             label='After Cannibalization (subtract baseline bundle units)', linestyle='--', marker='^')
+             label='After Cannibalization', linestyle='--', marker='^')
 if not b_ts_all.empty:
     axes[2].plot([b_ts_all.index[-1], COMMON_FC_INDEX[0]],
                  [b_ts_all.values[-1], b_fc_all.values[0]],
