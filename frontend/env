@@ -1,6 +1,0 @@
-# Frontend
-FRONTEND_PORT=5173
-VITE_KEYCLOAK_URL=http://localhost:8080
-VITE_KEYCLOAK_REALM=booklatte
-VITE_KEYCLOAK_CLIENT_ID=frontend
-VITE_MINIO_CONSOLE=http://localhost:9001   
