@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# denzel_holtwinters_summary_from_pedfile_surplus.py
-
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
