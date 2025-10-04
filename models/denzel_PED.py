@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-# ped_bundles_demandcurve_standalone.py
-#
-# Standalone PED (price elasticity of demand) calculator for product bundles.
-# - EXACT product_name -> product_id matching (consistent with your main HW script)
-# - Builds price–quantity points from receipts
-# - STRICT_BUNDLE_ONLY: if True, use only receipts whose product set is exactly {A,B}
-# - Fits log–log regression: log(Q) = intercept + ε * log(P)
-# - Plots the demand curve in original units: Q = exp(intercept) * P^ε
-# - Saves CSV summary + per-bundle demand-curve plots
-
 import os
 import sys
 import math

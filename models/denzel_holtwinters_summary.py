@@ -1,7 +1,9 @@
+#!/usr/bin/env python3
+# denzel_holtwinters_summary_from_pedfile_surplus.py
+
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from sklearn.linear_model import LinearRegression
 from pathlib import Path
 import sys
 import warnings
@@ -11,30 +13,25 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # =========================
 # USER CONFIGURATION
 # =========================
-# File paths
-RULES_PATH   = 'mba_meal/association_rules.csv'
-FACT_PATH    = 'etl_dimensions/fact_transaction_dimension.csv'
-PRODUCT_PATH = 'etl_dimensions/current_product_dimension.csv'
+RULES_PATH        = 'mba_meal/association_rules.csv'
+FACT_PATH         = 'etl_dimensions/fact_transaction_dimension.csv'
+PRODUCT_PATH      = 'etl_dimensions/current_product_dimension.csv'
+PED_SUMMARY_PATH  = 'ped_output/ped_summary.csv'   # <-- read ε and intercept from here
 
-# Top-N MBA rules to summarize (use the literal first TOP_N rows)
 TOP_N = 15
 
-# Time-series settings
 AGG_FREQ = 'QE'            # 'QE' Quarter End; ('MS' for Month Start, etc.)
-SEASONAL_PERIODS = 4       # 4 for quarterly, 12 for monthly, etc.
-HORIZON = 4                # number of future periods to forecast
+SEASONAL_PERIODS = 4
+HORIZON = 4
 
-# Holt–Winters smoothing (set OPTIMIZED=True to ignore the fixed alphas)
 OPTIMIZED = False
 HW_ALPHA = 0.2
 HW_BETA  = 0.2
 HW_GAMMA = 0.2
 
-# Pricing / discount (to mirror the in-depth file, set FORCE_NEW_PRICE to that same value)
-DISCOUNT_PCT   = 0.10        # used only when FORCE_NEW_PRICE is None
-FORCE_NEW_PRICE = None       # e.g., 392.4 (to match your in-depth run)
+DISCOUNT_PCT    = 0.10
+FORCE_NEW_PRICE = None
 
-# Output
 OUTPUT_CSV = 'mba_meal/bundle_holtwinters_summary.csv'
 
 # =========================
@@ -51,9 +48,6 @@ def require_columns(df: pd.DataFrame, cols: list[str], df_name: str):
         sys.exit(1)
 
 def resolve_ids_by_exact_names(rule_row: pd.Series, product_df: pd.DataFrame) -> tuple[str | None, str | None]:
-    """
-    Aligns with the in-depth script: resolve by EXACT product_name match only.
-    """
     nameA = rule_row.get('antecedents_names', None)
     nameB = rule_row.get('consequents_names', None)
     if nameA is None or nameB is None:
@@ -65,11 +59,6 @@ def resolve_ids_by_exact_names(rule_row: pd.Series, product_df: pd.DataFrame) ->
     return str(a_match['product_id'].iloc[0]), str(b_match['product_id'].iloc[0])
 
 def build_ts_receipt_presence(lines: pd.DataFrame, freq: str) -> pd.Series:
-    """
-    Collapse line items to a receipt-level presence time series at freq.
-    Counts the number of receipts containing the item.
-    (No asfreq padding — matches the in-depth script.)
-    """
     if lines.empty:
         return pd.Series(dtype=float)
     rec = lines.groupby('Receipt No').agg(Date=('Date', 'first'))
@@ -78,47 +67,18 @@ def build_ts_receipt_presence(lines: pd.DataFrame, freq: str) -> pd.Series:
     ts.index = pd.to_datetime(ts.index)
     return ts
 
-def demand_points_for_pair(fact_df: pd.DataFrame, id_a: str, id_b: str, freq: str) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Build price-quantity pairs for the bundle using receipts that contain BOTH items.
-    Also return the bundle baseline time series (count of such receipts per period).
-    """
+def bundle_baseline_series(fact_df: pd.DataFrame, id_a: str, id_b: str, freq: str) -> pd.Series:
     sub = fact_df[fact_df['Product ID'].astype(str).isin([str(id_a), str(id_b)])]
     receipt_products = sub.groupby('Receipt No')['Product ID'].apply(lambda s: set(s.astype(str)))
     both_receipts_idx = receipt_products[receipt_products.apply(lambda s: (str(id_a) in s) and (str(id_b) in s))].index
+
     working_df = fact_df[fact_df['Receipt No'].isin(both_receipts_idx)]
+    receipt_summary = working_df.groupby('Receipt No').agg(Date=('Date', 'first'))
 
-    # Demand by price point
-    receipt_summary = working_df.groupby('Receipt No').agg(
-        Combined_Price=('Line Total', 'sum'),
-        Date=('Date', 'first')
-    )
-    price_qty = (receipt_summary
-                 .groupby('Combined_Price')
-                 .agg(Num_Transactions=('Date', 'count'))
-                 .reset_index()
-                 .sort_values('Combined_Price'))
-
-    # Baseline bundle series
     receipt_summary['Date'] = pd.to_datetime(receipt_summary['Date'], errors='coerce')
     bundle_ts = receipt_summary.groupby(pd.Grouper(key='Date', freq=freq)).size().astype(float)
     bundle_ts.index = pd.to_datetime(bundle_ts.index)
-
-    return price_qty, bundle_ts
-
-def constant_elasticity(price_qty_df: pd.DataFrame) -> tuple[float, float]:
-    """
-    Log–log regression: log(Q) = intercept + elasticity * log(P)
-    Returns (elasticity, intercept). If insufficient data, returns (0.0, 0.0).
-    """
-    df = price_qty_df[(price_qty_df['Combined_Price'] > 0) &
-                      (price_qty_df['Num_Transactions'] > 0)].copy()
-    if len(df) < 2:
-        return 0.0, 0.0
-    df['log_P'] = np.log(df['Combined_Price'])
-    df['log_Q'] = np.log(df['Num_Transactions'])
-    reg = LinearRegression().fit(df[['log_P']], df['log_Q'])
-    return float(reg.coef_[0]), float(reg.intercept_)
+    return bundle_ts
 
 def _last_index_or_min(ts: pd.Series) -> pd.Timestamp:
     return ts.index[-1] if (ts is not None and not ts.empty) else pd.Timestamp.min
@@ -140,18 +100,10 @@ def build_common_fc_index(a_ts: pd.Series, b_ts: pd.Series, bundle_ts: pd.Series
     return pd.date_range(start=latest_actual + step, periods=horizon, freq=freq)
 
 def fit_and_forecast_to_index(series: pd.Series, idx: pd.DatetimeIndex) -> pd.Series:
-    """
-    Fit Holt–Winters to 'series' and forecast exactly onto 'idx'.
-    Return RAW forecast (may contain negatives). We will clip later, after elasticity, to
-    mirror the in-depth script.
-    """
     if series is None or series.empty:
         return pd.Series(0.0, index=idx, dtype=float)
-
-    # Ensure datetime index (no asfreq padding)
     series = series.copy()
     series.index = pd.to_datetime(series.index)
-
     model = ExponentialSmoothing(
         series, trend='add', seasonal='add',
         seasonal_periods=SEASONAL_PERIODS, initialization_method="estimated"
@@ -163,7 +115,7 @@ def fit_and_forecast_to_index(series: pd.Series, idx: pd.DatetimeIndex) -> pd.Se
                         optimized=False))
     fc = fitted.forecast(len(idx))
     fc.index = idx
-    return fc  # RAW (can be < 0)
+    return fc
 
 def safe_price(product_df: pd.DataFrame, product_id: str) -> float:
     row = product_df.loc[product_df['product_id'].astype(str) == str(product_id)]
@@ -173,11 +125,24 @@ def safe_name(product_df: pd.DataFrame, product_id: str) -> str:
     row = product_df.loc[product_df['product_id'].astype(str) == str(product_id)]
     return str(row['product_name'].iloc[0]) if not row.empty else f"(id:{product_id})"
 
+def pick_ped_row(ped_df: pd.DataFrame, id_a: str, id_b: str) -> pd.Series | None:
+    a, b = str(id_a), str(id_b)
+    m1 = (ped_df['product_id_1'].astype(str) == a) & (ped_df['product_id_2'].astype(str) == b)
+    m2 = (ped_df['product_id_1'].astype(str) == b) & (ped_df['product_id_2'].astype(str) == a)
+    matches = ped_df[m1 | m2].copy()
+    if matches.empty:
+        return None
+    non_strict = matches[matches['mode'].astype(str).str.lower() == 'non_strict']
+    if not non_strict.empty:
+        return non_strict.iloc[0]
+    return matches.iloc[0]
+
 # =========================
-# Core per-bundle computation
+# Core per-bundle computation (PED from file)
 # =========================
 def compute_bundle_summary_aligned(product_df: pd.DataFrame,
                                    fact_df: pd.DataFrame,
+                                   ped_df: pd.DataFrame,
                                    id_a: str, id_b: str,
                                    freq: str,
                                    horizon: int) -> dict:
@@ -185,9 +150,8 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
     a_lines = fact_df[fact_df['Product ID'].astype(str) == str(id_a)]
     b_lines = fact_df[fact_df['Product ID'].astype(str) == str(id_b)]
 
-    # Demand points + bundle baseline series
-    price_qty, bundle_ts = demand_points_for_pair(fact_df, id_a, id_b, freq)
-    elasticity, _intercept = constant_elasticity(price_qty)
+    # Bundle baseline series (count of receipts with BOTH items)
+    bundle_ts = bundle_baseline_series(fact_df, id_a, id_b, freq)
 
     # Individual histories
     a_ts = build_ts_receipt_presence(a_lines, freq)
@@ -195,7 +159,14 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
 
     series_len = int(max(len(bundle_ts), len(a_ts), len(b_ts)))
 
-    # Common forecast index (exactly like the in-depth script)
+    # --- Load ε from ped_summary.csv ---
+    ped_row = pick_ped_row(ped_df, id_a, id_b)
+    if ped_row is None:
+        epsilon = 0.0
+    else:
+        epsilon = float(ped_row['elasticity_epsilon']) if pd.notna(ped_row['elasticity_epsilon']) else 0.0
+
+    # Common forecast index
     COMMON_FC_INDEX = build_common_fc_index(a_ts, b_ts, bundle_ts, freq, horizon)
 
     # Forecast RAW (may be negative)
@@ -203,7 +174,7 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
     a_fc_all_raw  = fit_and_forecast_to_index(a_ts, COMMON_FC_INDEX)
     b_fc_all_raw  = fit_and_forecast_to_index(b_ts, COMMON_FC_INDEX)
 
-    # Clamp non-negative for downstream math (same as in-depth)
+    # Clamp non-negative
     bundle_fc = bundle_fc_raw.clip(lower=0)
     a_fc_all  = a_fc_all_raw.clip(lower=0)
     b_fc_all  = b_fc_all_raw.clip(lower=0)
@@ -219,11 +190,13 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
     else:
         new_price = current_price * (1.0 - float(DISCOUNT_PCT))
 
-    # Demand multiplier (power model), then adjust RAW bundle → then clip
+    # Demand multiplier (power model)
     if current_price > 0 and new_price > 0:
-        demand_multiplier = (new_price / current_price) ** elasticity
+        demand_multiplier = (new_price / current_price) ** epsilon
     else:
         demand_multiplier = 1.0
+
+    # Adjust RAW bundle forecast by elasticity, then clip
     bundle_fc_adj = (bundle_fc_raw * demand_multiplier).clip(lower=0)
 
     # Cannibalization (use non-negative baseline bundle units)
@@ -231,7 +204,7 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
     a_fc_after = (a_fc_all - cannibalization_units).clip(lower=0)
     b_fc_after = (b_fc_all - cannibalization_units).clip(lower=0)
 
-    # Revenue (per COMMON_FC_INDEX)
+    # Revenue totals
     rev_a_before = (a_fc_all * price_a).sum()
     rev_b_before = (b_fc_all * price_b).sum()
     rev_before_total = float(rev_a_before + rev_b_before)
@@ -243,8 +216,16 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
 
     impact_abs = float(rev_after_total - rev_before_total)
 
-    # Break-even (if negative impact)
-    break_even_units = int(np.ceil((-impact_abs) / new_price)) if (impact_abs < 0 and new_price > 0) else 0
+    # -------- BreakEven / SurplusUnits (signed) --------
+    # Positive  = surplus bundle units equivalent (floored)
+    # Negative  = break-even bundle units required (as negative, ceiled)
+    if new_price > 0:
+        if impact_abs >= 0:
+            units_signed = int(np.floor(impact_abs / new_price))
+        else:
+            units_signed = -int(np.ceil((-impact_abs) / new_price))
+    else:
+        units_signed = 0
 
     # Names (uncapped for CSV)
     name_a = safe_name(product_df, id_a)
@@ -260,7 +241,7 @@ def compute_bundle_summary_aligned(product_df: pd.DataFrame,
         'Revenue_Before': round(rev_before_total, 2),
         'Revenue_After': round(rev_after_total, 2),
         'Revenue_Impact': round(impact_abs, 2),
-        'BreakEven_Bundle_Units': break_even_units,
+        'BreakEven/ SurplusUnits': units_signed,   # <— signed units
         'Series_Length': series_len,
         'Forecast_Horizon': int(horizon),
     }
@@ -274,17 +255,21 @@ def main():
         rules_df = pd.read_csv(RULES_PATH)
         fact_df = pd.read_csv(FACT_PATH)
         product_df = pd.read_csv(PRODUCT_PATH)
+        ped_df = pd.read_csv(PED_SUMMARY_PATH)
     except FileNotFoundError as e:
         print(f"Error loading data: {e}")
         sys.exit(1)
 
     # Column sanity
-    require_columns(rules_df, ['antecedents_names', 'consequents_names'], 'RULES file')
-    require_columns(fact_df,  ['Product ID', 'Receipt No', 'Line Total', 'Date'], 'FACT file')
+    require_columns(rules_df,   ['antecedents_names', 'consequents_names'], 'RULES file')
+    require_columns(fact_df,    ['Product ID', 'Receipt No', 'Line Total', 'Date'], 'FACT file')
     require_columns(product_df, ['product_id', 'product_name', 'Price'], 'PRODUCT file')
+    require_columns(ped_df,     ['product_id_1','product_id_2',
+                                 'elasticity_epsilon','intercept_logk','mode','n_price_points'],
+                    'PED SUMMARY file')
 
     # Header
-    forced = FORCE_NEW_PRICE is not None
+    forced   = FORCE_NEW_PRICE is not None
     disc_str = f"forced price={FORCE_NEW_PRICE:.2f}" if forced else f"{DISCOUNT_PCT*100:.1f}%"
     print(f"=== Bundle Forecast Summary (TOP {TOP_N} MBA rules; product_id bundles) ===")
     print(f"Discount: {disc_str} | Freq: {AGG_FREQ} | Horizon: {HORIZON} | Seasonal periods: {SEASONAL_PERIODS}")
@@ -295,11 +280,10 @@ def main():
         rule = rules_df.iloc[i]
         id_a, id_b = resolve_ids_by_exact_names(rule, product_df)
         if not id_a or not id_b:
-            # Align with in-depth behavior: if names can't be resolved, skip
             continue
         try:
-            row = compute_bundle_summary_aligned(product_df, fact_df, id_a, id_b,
-                                                 AGG_FREQ, HORIZON)
+            row = compute_bundle_summary_aligned(product_df, fact_df, ped_df,
+                                                 id_a, id_b, AGG_FREQ, HORIZON)
             rows.append(row)
         except Exception as e:
             print(f"[WARN] Skipping rule row {i} ({id_a}, {id_b}) due to error: {e}")
@@ -308,18 +292,18 @@ def main():
         print("No bundles resolved; nothing to summarize.")
         sys.exit(0)
 
-    # Exact column order
+    # Exact column order (updated label)
     out_cols = [
         'product_id_1','product_id_2','product name 1','product name 2',
         'Price','Discounted_Price','Revenue_Before','Revenue_After',
-        'Revenue_Impact','BreakEven_Bundle_Units','Series_Length','Forecast_Horizon'
+        'Revenue_Impact','BreakEven/ SurplusUnits','Series_Length','Forecast_Horizon'
     ]
     out_df = pd.DataFrame(rows)[out_cols]
 
-    # Console table with capped names
+    # Console table with capped names (updated label)
     print_cols = [
         'product name 1','product name 2','Price','Discounted_Price',
-        'Revenue_Before','Revenue_After','Revenue_Impact','BreakEven_Bundle_Units'
+        'Revenue_Before','Revenue_After','Revenue_Impact','BreakEven/ SurplusUnits'
     ]
     printable = out_df.copy()
     printable['product name 1'] = printable['product name 1'].map(lambda s: cap(s, 50))
